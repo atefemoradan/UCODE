@@ -129,6 +129,10 @@ class LFRGenerator:
                 seed=seed
             )
 
+    def calculate_layout(self):
+        print('Calculating spring layout for plot...')
+        self.pos = nx.spring_layout(self.graph, seed=123, k=0.35)
+
     def process_communities(self):
         communities = list(nx.get_node_attributes(self.graph, 'community').values())
         communities = [list(member) for member in communities]
@@ -146,7 +150,6 @@ class LFRGenerator:
         nx.set_node_attributes(self.graph, self.labels, 'labels')
         nx.set_node_attributes(self.graph, self.community_sizes, 'community_sizes')
 
-
     def save_graph(self, path=None):
         if not os.path.isdir(self.file_dir):
             os.makedirs(self.file_dir)
@@ -159,17 +162,15 @@ class LFRGenerator:
             os.makedirs(self.plot_dir)
         if path is None:
             path = os.path.join(self.plot_dir, self.plot_name)
-        self._save_plot(path)
+        plt.savefig(path)
 
     def draw_plot(self):
-        # drawing nodes and edges separately so we can capture collection for colobar
-        print('\tCalculating spring layout for plot...')
-        fig = plt.figure(figsize=(10, 6))
-        pos = nx.spring_layout(self.graph, seed=123, k=0.35)
-        ec = nx.draw_networkx_edges(self.graph, pos, alpha=0.1)
+        # drawing nodes and edges separately so we can capture collection for colorbar
+        plt.figure(figsize=(10, 6))
+        ec = nx.draw_networkx_edges(self.graph, self.pos, alpha=0.1)
         nc = nx.draw_networkx_nodes(
             self.graph,
-            pos,
+            self.pos,
             nodelist=self.graph.nodes(),
             node_color=list(self.labels.values()), 
             node_size=20,
@@ -180,13 +181,39 @@ class LFRGenerator:
         cb = plt.colorbar(nc)
         cb.set_label('Community Label')
         plt.axis('off')
+        self.save_plot()
         plt.show()
-        # plt.savefig('figures/community_membership.png')
         plt.clf()
 
-    def _save_plot(self, path):
-        pass
-
+    def draw_community(self, label):
+        """
+        Draw a single community as a separate color from every other node
+        """
+        plt.figure(figsize=(10, 6))
+        ec = nx.draw_networkx_edges(self.graph, self.pos, alpha=0.1)
+        labels_array = np.array(list(self.labels.values()))
+        # Nodes that don't belong to the community get off-white color
+        #   0.96 out of [0, 1] in colormap since 1 is just white.
+        labels_mask = np.ones_like(labels_array) * 0.96
+        indices = np.where(labels_array == label)
+        labels_mask[indices] = 0
+        nc = nx.draw_networkx_nodes(
+            self.graph,
+            self.pos,
+            nodelist=self.graph.nodes(),
+            node_color=labels_mask, 
+            node_size=20,
+            cmap=plt.cm.gist_earth,
+            vmin=0,
+            vmax=1
+        )
+        cb = plt.colorbar(nc)
+        cb.set_label('Community Label')
+        plt.axis('off')
+        plt.title('Location of community %d' % label)
+        self.save_plot()
+        plt.show()
+        plt.clf()
 
 if __name__ == '__main__':
     lfr = LFRGenerator(
@@ -201,4 +228,6 @@ if __name__ == '__main__':
         mu=0.4,
     )
     lfr.process_communities()
-    lfr.draw_plot()
+    lfr.calculate_layout()
+    # lfr.draw_plot()
+    # lfr.draw_community(label=2)

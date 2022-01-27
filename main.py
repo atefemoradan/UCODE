@@ -53,6 +53,9 @@ def datapreprocessing():
     adj, features, labels, label_mask = com.load_npz_to_sparse_graph(path + 'dataset/' + dataset +'.npz')
     network = nx.from_scipy_sparse_matrix(adj)
     features = sparse.csr_matrix(features)
+  elif type=="adjlist":
+    network = nx.read_adjlist(path)
+    labels = list(nx.get_node_attributes(self.graph, 'labels').values())
   nb_nodes = features.shape[0]
   ft_size = features.shape[1]
   #nb_classes = labels.shape[1]
