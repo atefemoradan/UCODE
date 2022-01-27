@@ -38,6 +38,32 @@ def loss_modularity_trace(logits, B, nb_community,hid_units,m):
   return loss
 
 
+def analysis_loss(logits, B, nb_community,hid_units,m):
+    logits_T = logits.transpose(1, 2)
+    modularity = torch.matmul(torch.matmul(logits_T, B), logits)
+
+    idx = np.random.permutation(hid_units)
+    shuf_fts = modularity[:, idx, :]
+    lbl_1 = torch.ones(1, hid_units)
+    lbl_2 = torch.zeros(1, hid_units)
+    lbl = torch.cat((lbl_2, lbl_1), 1)
+    diag1 = torch.div(torch.diag(modularity[0], 0), m)
+    diag2 = torch.div(torch.diag(shuf_fts[0], 0), m)
+
+    input = torch.cat((diag2, diag1), 0)
+    input = input.unsqueeze(0)
+    if torch.cuda.is_available():
+        shuf_fts = shuf_fts.cuda()
+        lbl = lbl.cuda()
+        input = input.cuda()
+
+    if torch.cuda.is_available():
+        shuf_fts = shuf_fts.cuda()
+        lbl = lbl.cuda()
+    loss = b_xent(input, lbl)
+    loss.requires_grad_(True)
+    return loss
+
 """def loss_modularity_trace1(logits, B, nb_community,hid_units,m):
 
   logittrans = logits.transpose(1, 2)

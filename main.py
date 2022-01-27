@@ -35,8 +35,8 @@ If the modularity matrix (B) is saved in the system existB would be equal to 1""
 
 """Set the path of the dataset folder"""
 path=os.path.dirname(os.path.abspath(__file__))
-type="kipf"
-dataset ='cora'
+type="npz"
+dataset ='fb_1684'
 ncommunity=7
 hid_units =16
 existB=1
@@ -46,11 +46,18 @@ def datapreprocessing():
 
   if type=='kipf':
     adj, features, labels = com.load_data(dataset)
-    with open(path + "dataset/ind." + str(dataset) + ".graph", 'rb') as f:
+    with open(os.path.join(path, "dataset/ind." + str(dataset) + ".graph"), 'rb') as f:
       Graph = pkl.load(f, encoding='latin1')
     network = nx.Graph(Graph)
   elif type=="npz":
-    adj, features, labels, label_mask = com.load_npz_to_sparse_graph(path + 'dataset/' + dataset +'.npz')
+    # adj, features, labels, label_mask = com.load_npz_to_sparse_graph(
+    #   os.path.join(path, 'dataset', dataset + '.npz')
+    # )
+    graph = com.load_npz_dataset(os.path.join(path, 'dataset', dataset + '.npz'))
+    adj = graph['A']
+    features = graph['X']
+    # labels should be converted from one-hots to be input
+    labels = graph['Z']
     network = nx.from_scipy_sparse_matrix(adj)
     features = sparse.csr_matrix(features)
   nb_nodes = features.shape[0]
@@ -58,20 +65,20 @@ def datapreprocessing():
   #nb_classes = labels.shape[1]
   m=len(network.edges)
   if existB==0:
+    print(dataset)
     B=com.get_B(network)
     print(B.shape)
     adj_metric=adj
-    np.save(path+'dataset/Modularity-'+dataset+'npy',B)
+    np.save(os.path.join(path, 'dataset/Modularity-'+dataset), B)
   else:
     #B=np.load(path+"dataset/Modularity-matrix-"+str(dataset)+'.npy')
-    B = np.load(path+'dataset/Modularity-'+dataset+'.npy')
+    B = np.load(os.path.join(path, 'dataset/Modularity-'+dataset+'.npy'))
     adj_metric = adj
   if type=="npz":
     features,adj,B,labels_clus=com.convert_torch_npz( adj,features,B,labels)
   elif type=="kipf":
     features, adj, B, labels_clus = com.convert_torch_kipf(adj, features, B, labels)
   return features,adj,B,labels_clus,nb_nodes,ft_size,adj_metric,m
-
 
 
 def training():
