@@ -201,7 +201,7 @@ def conductance(adjacency, clusters):
   return intra / (inter + intra)
 
 def modularity(adjacency, clusters):
-  degrees = adjacency.sum(axis=0).A1
+  degrees = adjacency.sum(axis=0)# .A1
   m = degrees.sum()
   result = 0
   for cluster_id in np.unique(clusters):

@@ -10,10 +10,12 @@ from sklearn.metrics.cluster import normalized_mutual_info_score
 from Lossfunction import loss_modularity_trace
 from scipy import sparse
 import os
+import copy
 from sklearn import metrics
 from utils import precision
 from utils import recall
 from matplotlib import pyplot as plt
+from matplotlib.patches import Patch
 
 from networkx.generators.degree_seq import expected_degree_graph
 
@@ -27,6 +29,7 @@ class OverlapAnalyzer:
     def __init__(
         self,
         epochs=500,
+        num_iters=16,
         hid_units=16,
         overlap_name='fb_1684',
         disjoint_name='cora'
@@ -42,6 +45,7 @@ class OverlapAnalyzer:
         # It's the length of the one-hot, yes?
         self.hid_units = hid_units
         self.epochs = epochs
+        self.num_iters = num_iters
         self.x_ent = nn.BCEWithLogitsLoss()
 
         self._get_disjoint_data()
@@ -133,19 +137,18 @@ class OverlapAnalyzer:
         logits_T = logits.transpose(1, 2)
         modularity = torch.matmul(torch.matmul(logits_T, data['B']), logits)
 
-        inds = torch.argsort(modularity, dim=1)
-        zeros = torch.zeros_like(modularity)
-        mod2 = modularity * (inds == contrast_value)
-        print(torch.max(mod2, dim=1))
-        quit()
-        shuf_fts = modularity[:, idx, :]
-        lbl_1 = torch.ones(1, self.hid_units)
-        lbl_2 = torch.zeros(1, self.hid_units)
-        lbl = torch.cat((lbl_2, lbl_1), 1)
-        diag1 = torch.div(torch.diag(modularity[0], 0), data['m'])
-        diag2 = torch.div(torch.diag(shuf_fts[0], 0), data['m'])
+        lbl = torch.cat((
+            torch.ones(1, self.hid_units),
+            torch.zeros(1, self.hid_units)
+        ), 1)
 
-        diags = torch.cat((diag2, diag1), 0)
+        attractive = torch.div(torch.diag(modularity[0], 0), data['m'])
+        inds = torch.argsort(modularity, dim=1)
+        sort_mask = inds == contrast_value
+        repulsive = torch.masked_select(modularity, sort_mask)
+        repulsive = torch.div(repulsive, data['m'])
+
+        diags = torch.cat((attractive, repulsive), 0)
         diags = diags.unsqueeze(0)
         if torch.cuda.is_available():
             shuf_fts = shuf_fts.cuda()
@@ -159,19 +162,32 @@ class OverlapAnalyzer:
         loss.requires_grad_(True)
         return loss
 
-    def analyze_overlap(self):
-        scores = {
-            'nmit': [],
-            'modularityt': [],
-            'conductancet': [],
-            'cst': [],
-            'precisiont': [],
-            'recalt': [],
-            'Fscoret': [],
-            'nmikmean': [],
+    def _get_empty_dicts(self):
+        dataset_scores = {
+            'nmi': [],
+            'modularity': [],
+            'conductance': [],
+            'completeness': [],
+            'precision': [],
+            'recall': [],
+            'Fscore': [],
         }
-        for i in range(1):
-            for data in [self.disjoint_data, self.overlap_data]:
+        scores_dict = {
+            'disjoint': copy.deepcopy(dataset_scores),
+            'overlap': copy.deepcopy(dataset_scores)
+        }
+
+        dataset_dict = {
+            'disjoint': self.disjoint_data,
+            'overlap': self.overlap_data
+        }
+        return scores_dict, dataset_dict
+
+    def analyze_overlap(self):
+        scores_dict, dataset_dict = self._get_empty_dicts()
+        for i in range(1, self.num_iters):
+            for mode in ['disjoint', 'overlap']:
+                data = dataset_dict[mode]
                 model = None
                 model = GCN(data['ft_size'], self.hid_units, data['nb_nodes'])
                 if torch.cuda.is_available():
@@ -186,7 +202,8 @@ class OverlapAnalyzer:
                     optimiser.zero_grad()
 
                     logits = model(data['features'], data['adj'])
-                    loss = self.sort_loss(logits, data, 1)
+                    loss = self.sort_loss(logits, data, i)
+                    # loss = self.base_loss(logits, data)
                     loss.backward()
                     optimiser.step()
 
@@ -202,14 +219,56 @@ class OverlapAnalyzer:
                     nmi_kmean = normalized_mutual_info_score(data['labels'], kmeans.labels_)
                     print(epoch, '---', nmi_kmean)
 
-                modularity = com.modularity(data['adj'], kmeans.labels_)
-                conductance = com.conductance(data['adj'], kmeans.labels_)
+                np_adj = torch.squeeze(data['adj']).detach().numpy()
+                modularity = com.modularity(np_adj, kmeans.labels_)
+                conductance = com.conductance(np_adj, kmeans.labels_)
                 p = precision(data['labels'], kmeans.labels_)
                 r = recall(data['labels'], kmeans.labels_)
                 completeness = metrics.completeness_score(data['labels'], kmeans.labels_)
                 F_score = 2 * ((r * p) / (r + p))
 
+                scores_dict[mode]['nmi'].append(nmi_kmean)
+                scores_dict[mode]['modularity'].append(modularity)
+                scores_dict[mode]['conductance'].append(conductance)
+                scores_dict[mode]['completeness'].append(completeness)
+                scores_dict[mode]['precision'].append(p)
+                scores_dict[mode]['recall'].append(r)
+                scores_dict[mode]['Fscore'].append(F_score)
+
+        np.save('overlap_analysis_results.npy', scores_dict)
+
+def make_plots(path, num_iters):
+    scores_dict = np.load(path, allow_pickle=True)[()]
+    x_vals = np.arange(1, num_iters)
+    modes = ['disjoint', 'overlap']
+    cmap = dict(zip(modes, ['b', 'g']))
+    patches = [Patch(color=v, label=k) for k, v in cmap.items()]
+    for i, key in enumerate(scores_dict['disjoint']):
+        disjoint_scores = scores_dict['disjoint'][key]
+        overlap_scores = scores_dict['overlap'][key]
+
+        ax = plt.subplot(111)
+        ax.bar(x_vals - 0.15, disjoint_scores, width=0.3, color='b', align='center')
+        ax.bar(x_vals + 0.15, overlap_scores, width=0.3, color='g', align='center')
+        ax.set_ylim([0.0, max([max(disjoint_scores), max(overlap_scores)]) * 1.2])
+        plt.title('Effect of contrastive index on %s' % key)
+        plt.legend(
+            labels=modes,
+            handles=patches,
+            loc='upper center',
+            ncol=num_iters - 1,
+            borderaxespad=0,
+            fontsize=15,
+        )
+        plt.xticks(x_vals)
+        plt.xlabel('Contrastive index')
+        plt.ylabel(key)
+
+        plt.show()
+        plt.clf()
 
 if __name__ == '__main__':
-    analyzer = OverlapAnalyzer()
-    analyzer.analyze_overlap()
+    # analyzer = OverlapAnalyzer(num_iters=16)
+    # analyzer.analyze_overlap()
+
+    make_plots('test.npy', 3)
