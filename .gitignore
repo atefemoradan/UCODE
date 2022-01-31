@@ -1,2 +1,9 @@
 /venv/
 /.idea/
+dataset/*.npy
+dataset/*.npz
+*.npy
+analysis_figs/
+LFR_figures/
+__pycache__
+.DS_Store

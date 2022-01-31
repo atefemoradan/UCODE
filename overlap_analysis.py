@@ -264,11 +264,11 @@ def make_plots(path, num_iters):
         plt.xlabel('Contrastive index')
         plt.ylabel(key)
 
-        plt.show()
+        plt.savefig(os.path.join('analysis_figs', '{}.png'.format(key)))
         plt.clf()
 
 if __name__ == '__main__':
     # analyzer = OverlapAnalyzer(num_iters=16)
     # analyzer.analyze_overlap()
 
-    make_plots('test.npy', 3)
+    make_plots('overlap_analysis_results.npy', 16)
