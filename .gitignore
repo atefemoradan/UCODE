@@ -1,9 +1,14 @@
 /venv/
 /.idea/
+dataset/ind*
+dataframes/
+*.csv
+*.swp
 dataset/*.npy
 dataset/*.npz
 *.npy
 analysis_figs/
 LFR_figures/
+plotly/
 __pycache__
 .DS_Store

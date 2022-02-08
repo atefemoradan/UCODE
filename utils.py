@@ -1,5 +1,5 @@
-
 import numpy as np
+from tqdm import tqdm
 import pickle as pkl
 import networkx as nx
 import scipy.sparse as sp
@@ -19,32 +19,127 @@ from scipy.sparse import csr_matrix
 path=os.path.dirname(os.path.abspath(__file__))
 
 # From Dmon Model
-def _compute_counts(y_true, y_pred):  #
-  contingency = contingency_matrix(y_true, y_pred)
-  same_class_true = np.max(contingency, 1)
-  same_class_pred = np.max(contingency, 0)
-  diff_class_true = contingency.sum(axis=1) - same_class_true
-  diff_class_pred = contingency.sum(axis=0) - same_class_pred
-  total = contingency.sum()
+def _compute_counts(y_true, y_pred):    #
+    contingency = contingency_matrix(y_true, y_pred)
+    same_class_true = np.max(contingency, 1)
+    same_class_pred = np.max(contingency, 0)
+    diff_class_true = contingency.sum(axis=1) - same_class_true
+    diff_class_pred = contingency.sum(axis=0) - same_class_pred
+    total = contingency.sum()
 
-  true_positives = (same_class_true * (same_class_true - 1)).sum()
-  false_positives = (diff_class_true * same_class_true * 2).sum()
-  false_negatives = (diff_class_pred * same_class_pred * 2).sum()
-  true_negatives = total * (
-      total - 1) - true_positives - false_positives - false_negatives
+    true_positives = (same_class_true * (same_class_true - 1)).sum()
+    false_positives = (diff_class_true * same_class_true * 2).sum()
+    false_negatives = (diff_class_pred * same_class_pred * 2).sum()
+    true_negatives = total * (
+        total - 1) - true_positives - false_positives - false_negatives
 
-  return true_positives, false_positives, false_negatives, true_negatives
+    return true_positives, false_positives, false_negatives, true_negatives
 
 
 def precision(y_true, y_pred):
-  true_positives, false_positives, _, _ = _compute_counts(y_true, y_pred)
-  return true_positives / (true_positives + false_positives)
+    true_positives, false_positives, _, _ = _compute_counts(y_true, y_pred)
+    return true_positives / (true_positives + false_positives)
 
+def disjoint_recall(y_true, y_pred):
+    true_positives, _, false_negatives, _ = _compute_counts(y_true, y_pred)
+    return true_positives / (true_positives + false_negatives)
 
-def recall(y_true, y_pred):
-  true_positives, _, false_negatives, _ = _compute_counts(y_true, y_pred)
-  return true_positives / (true_positives + false_negatives)
+def cal_avg_recall(detected_communites, num_comms):
+    avg_recall = 0
+    for i in range(0, num_comms):
+        avg_recall += detected_communites[i][1]
+    return avg_recall / num_comms
 
+def detect_community_by_recall(y_true, y_pred, num_comms):
+    all={}
+    for a in range(0, num_comms): # For each community in ground truth
+        each = []
+        recall = -1
+        best_match_comm = -1
+        for p in range(0, num_comms): # For each in assigned coomunities (As communities may shift positions)
+            if p in y_pred.keys():
+                intersection = y_true[a].intersection(y_pred[p])
+                current_recall = len(intersection) / len(y_true[a])
+                if current_recall > recall:
+                    recall = current_recall
+                    best_match_comm = p
+        each.append(best_match_comm) #appending the best matched coounity from assigned 
+        each.append(recall) # and its recall score
+        all[a] = each
+        y_pred.pop(best_match_comm) # removing the best matched detected community
+    return all
+
+def overlap_recall(y_true, y_pred, num_comms):
+    ground_truth = [set() for j in range(num_comms)]
+    predictions = {j: [] for j in range(num_comms)}
+    for i, node_preds in enumerate(y_pred):
+        for j, node in enumerate(node_preds):
+            if node:
+                predictions[j].append(i)
+    for i, node_truths in enumerate(y_true):
+        for j, node in enumerate(node_truths):
+            if node:
+                ground_truth[j].add(i)
+    detected_communites = detect_community_by_recall(
+        ground_truth,
+        predictions,
+        num_comms
+    )
+    average_recall = cal_avg_recall(detected_communites, num_comms)
+    return average_recall
+
+def overlap_nmi(X, Y):
+    if not ((X == 0) | (X == 1)).all():
+        raise ValueError("X should be a binary matrix")
+    if not ((Y == 0) | (Y == 1)).all():
+        raise ValueError("Y should be a binary matrix")
+
+    # if X.shape[1] > X.shape[0] or Y.shape[1] > Y.shape[0]:
+    #     warnings.warn("It seems that you forgot to transpose the F matrix")
+    X = X.T
+    Y = Y.T
+    def cmp(x, y):
+        """Compare two binary vectors."""
+        a = (1 - x).dot(1 - y)
+        d = x.dot(y)
+        c = (1 - y).dot(x)
+        b = (1 - x).dot(y)
+        return a, b, c, d
+
+    def h(w, n):
+        """Compute contribution of a single term to the entropy."""
+        if w == 0:
+            return 0
+        else:
+            return -w * np.log2(w / n)
+
+    def H(x, y):
+        """Compute conditional entropy between two vectors."""
+        a, b, c, d = cmp(x, y)
+        n = len(x)
+        if h(a, n) + h(d, n) >= h(b, n) + h(c, n):
+            return h(a, n) + h(b, n) + h(c, n) + h(d, n) - h(b + d, n) - h(a + c, n)
+        else:
+            return h(c + d, n) + h(a + b, n)
+    def H_uncond(X):
+        """Compute unconditional entropy of a single binary matrix."""
+        return sum(h(x.sum(), len(x)) + h(len(x) - x.sum(), len(x)) for x in X)
+
+    def H_cond(X, Y):
+        """Compute conditional entropy between two binary matrices."""
+        m, n = X.shape[0], Y.shape[0]
+        scores = np.zeros([m, n])
+        for i in range(m):
+            for j in range(n):
+                scores[i, j] = H(X[i], Y[j])
+        return scores.min(axis=1).sum()
+
+    if X.shape[1] != Y.shape[1]:
+        raise ValueError("Dimensions of X and Y don't match. (Samples must be stored as COLUMNS)")
+    H_X = H_uncond(X)
+    H_Y = H_uncond(Y)
+    I_XY = 0.5 * (H_X + H_Y - H_cond(X, Y) - H_cond(Y, X))
+    return I_XY / max(H_X, H_Y)
 
 def parse_index_file(filename):
     """Parse index file."""
@@ -115,33 +210,33 @@ def random_edge(graph):
     graph.add_edge(chosen_nonedge[0], chosen_nonedge[1])
 
     return graph
+
 """Calculate B Matrix"""
-
 def get_B(G):
-  Q = 0
-  G = G.copy()
-  nx.set_edge_attributes(G, {e:1 for e in G.edges}, 'weight')
-  A = nx.to_scipy_sparse_matrix(G).astype(float)
+    Q = 0
+    G = G.copy()
+    nx.set_edge_attributes(G, {e:1 for e in G.edges}, 'weight')
+    A = nx.to_scipy_sparse_matrix(G).astype(float)
 
-  if type(G) == nx.Graph:
-      # for undirected graphs, in and out treated as the same thing
-      out_degree = in_degree = dict(nx.degree(G))
-      print(out_degree)
-      M = 2.*(G.number_of_edges())
-      print("Calculating modularity for undirected graph")
-  elif type(G) == nx.DiGraph:
-      in_degree = dict(G.in_degree())
-      out_degree = dict(G.out_degree())
-      M = 1.*G.number_of_edges()
-      print("Calculating modularity for directed graph")
-  else:
-      print('Invalid graph type')
-      raise TypeError
-  Q=np.zeros(A.shape)
-  nodes = list(G)
-  for i, j in product(range(len(nodes)),range(len(nodes))):
-    Q[i,j]=A[i,j]-(in_degree[nodes[i]]*out_degree[nodes[j]]/M )
-  return Q/4
+    if type(G) == nx.Graph:
+        # for undirected graphs, in and out treated as the same thing
+        out_degree = in_degree = dict(nx.degree(G))
+        M = 2.*(G.number_of_edges())
+        print("Calculating modularity for undirected graph")
+    elif type(G) == nx.DiGraph:
+        in_degree = dict(G.in_degree())
+        out_degree = dict(G.out_degree())
+        M = 1.*G.number_of_edges()
+        print("Calculating modularity for directed graph")
+    else:
+        print('Invalid graph type')
+        raise TypeError
+    Q=np.zeros(A.shape)
+    nodes = list(G)
+    inds = product(range(len(nodes)),range(len(nodes)))
+    for i, j in tqdm(inds, total=len(nodes) * len(nodes)):
+        Q[i,j]=A[i,j]-(in_degree[nodes[i]]*out_degree[nodes[j]]/M )
+    return Q/4
 
 
 def sparse_to_tuple(sparse_mx, insert_batch=False):
@@ -189,85 +284,90 @@ def sparse_mx_to_torch_sparse_tensor(sparse_mx):
     return torch.sparse.FloatTensor(indices, values, shape)
 
 def conductance(adjacency, clusters):
-  inter = 0
-  intra = 0
-  cluster_idx = np.zeros(adjacency.shape[0], dtype=np.bool)
-  for cluster_id in np.unique(clusters):
-    cluster_idx[:] = 0
-    cluster_idx[np.where(clusters == cluster_id)[0]] = 1
-    adj_submatrix = adjacency[cluster_idx, :]
-    inter += np.sum(adj_submatrix[:, cluster_idx])
-    intra += np.sum(adj_submatrix[:, ~cluster_idx])
-  return intra / (inter + intra)
+    inter = 0
+    intra = 0
+    cluster_idx = np.zeros(adjacency.shape[0], dtype=np.bool)
+    for cluster_id in np.unique(clusters):
+        cluster_idx[:] = 0
+        cluster_idx[np.where(clusters == cluster_id)[0]] = 1
+        adj_submatrix = adjacency[cluster_idx, :]
+        inter += np.sum(adj_submatrix[:, cluster_idx])
+        intra += np.sum(adj_submatrix[:, ~cluster_idx])
+    return intra / (inter + intra)
 
 def modularity(adjacency, clusters):
-  degrees = adjacency.sum(axis=0)# .A1
-  m = degrees.sum()
-  result = 0
-  for cluster_id in np.unique(clusters):
-    cluster_indices = np.where(clusters == cluster_id)[0]
-    adj_submatrix = adjacency[cluster_indices, :][:, cluster_indices]
-    degrees_submatrix = degrees[cluster_indices]
-    result += np.sum(adj_submatrix) - (np.sum(degrees_submatrix)**2) / m
-  return result / m
+    degrees = adjacency.sum(axis=0)# .A1
+    m = degrees.sum()
+    result = 0
+    for cluster_id in np.unique(clusters):
+        cluster_indices = np.where(clusters == cluster_id)[0]
+        adj_submatrix = adjacency[cluster_indices, :][:, cluster_indices]
+        degrees_submatrix = degrees[cluster_indices]
+        result += np.sum(adj_submatrix) - (np.sum(degrees_submatrix)**2) / m
+    return result / m
 
 def convert_torch_npz(adj,features,B,labels):
-  features, _ = preprocess_features(features)
-  B = torch.FloatTensor(B[np.newaxis])
-  adj =normalize_adj(adj + sp.eye(adj.shape[0]))
-  adj = (adj + sp.eye(adj.shape[0])).todense()
-  features = torch.FloatTensor(features[np.newaxis])
-  adj = torch.FloatTensor(adj[np.newaxis])
-  #labels = torch.FloatTensor(labels[np.newaxis])
-  labels_clus=labels
-  #labels_clus=torch.argmax(labels[0],dim=1).detach().cpu().numpy()
-  return features,adj,B,labels_clus
+    features, _ = preprocess_features(features)
+    B = torch.FloatTensor(B[np.newaxis])
+    adj =normalize_adj(adj + sp.eye(adj.shape[0]))
+    adj = (adj + sp.eye(adj.shape[0])).todense()
+    features = torch.FloatTensor(features[np.newaxis])
+    adj = torch.FloatTensor(adj[np.newaxis])
+    #labels = torch.FloatTensor(labels[np.newaxis])
+    labels_clus=labels
+    #labels_clus=torch.argmax(labels[0],dim=1).detach().cpu().numpy()
+    return features,adj,B,labels_clus
 
 def convert_torch_kipf(adj,features,B,labels):
-  features, _ = preprocess_features(features)
-  B = torch.FloatTensor(B[np.newaxis])
-  adj =normalize_adj(adj + sp.eye(adj.shape[0]))
-  adj = (adj + sp.eye(adj.shape[0])).todense()
-  features = torch.FloatTensor(features[np.newaxis])
-  adj = torch.FloatTensor(adj[np.newaxis])
-  labels = torch.FloatTensor(labels[np.newaxis])
-  labels_clus=labels
-  labels_clus=torch.argmax(labels[0],dim=1).detach().cpu().numpy()
-  return features,adj,B,labels_clus
+    features, _ = preprocess_features(features)
+    B = torch.FloatTensor(B[np.newaxis])
+    adj =normalize_adj(adj + sp.eye(adj.shape[0]))
+    adj = (adj + sp.eye(adj.shape[0])).todense()
+    features = torch.FloatTensor(features[np.newaxis])
+    adj = torch.FloatTensor(adj[np.newaxis])
+    labels = torch.FloatTensor(labels[np.newaxis])
+    labels_clus=labels
+    labels_clus=torch.argmax(labels[0],dim=1).detach().cpu().numpy()
+    return features,adj,B,labels_clus
 
 def load_npz_to_sparse_graph(file_name):  # pylint: disable=missing-function-docstring
-  with np.load(open(file_name, 'rb'), allow_pickle=True) as loader:
-    loader = dict(loader)
-    adj_matrix = csr_matrix(
-        (loader['adj_data'], loader['adj_indices'], loader['adj_indptr']),
-        shape=loader['adj_shape'])
+    with np.load(open(file_name, 'rb'), allow_pickle=True) as loader:
+        loader = dict(loader)
+        adj_matrix = csr_matrix(
+            (loader['adj_data'], loader['adj_indices'], loader['adj_indptr']),
+            shape=loader['adj_shape']
+        )
 
     if 'attr_data' in loader:
-      # Attributes are stored as a sparse CSR matrix
-      attr_matrix = csr_matrix(
-          (loader['attr_data'], loader['attr_indices'], loader['attr_indptr']),
-          shape=loader['attr_shape']).todense()
+        # Attributes are stored as a sparse CSR matrix
+        attr_matrix = csr_matrix(
+            (loader['attr_data'], loader['attr_indices'], loader['attr_indptr']),
+            shape=loader['attr_shape']
+        ).todense()
     elif 'attr_matrix' in loader:
-      # Attributes are stored as a (dense) np.ndarray
-      attr_matrix = loader['attr_matrix']
+        # Attributes are stored as a (dense) np.ndarray
+        attr_matrix = loader['attr_matrix']
     else:
-      raise Exception('No attributes in the data file', file_name)
+        raise Exception('No attributes in the data file', file_name)
 
     if 'labels_data' in loader:
-      # Labels are stored as a CSR matrix
-      labels = csr_matrix((loader['labels_data'], loader['labels_indices'],
-                           loader['labels_indptr']),
-                          shape=loader['labels_shape'])
-      label_mask = labels.nonzero()[0]
-      labels = labels.nonzero()[1]
+        # Labels are stored as a CSR matrix
+        labels = csr_matrix(
+            (loader['labels_data'],
+             loader['labels_indices'],
+             loader['labels_indptr']),
+            shape=loader['labels_shape']
+        )
+        label_mask = labels.nonzero()[0]
+        labels = labels.nonzero()[1]
     elif 'labels' in loader:
-      # Labels are stored as a numpy array
-      labels = loader['labels']
-      label_mask = np.ones(labels.shape, dtype=np.bool)
+        # Labels are stored as a numpy array
+        labels = loader['labels']
+        label_mask = np.ones(labels.shape, dtype=np.bool)
     else:
-      raise Exception('No labels in the data file', file_name)
+        raise Exception('No labels in the data file', file_name)
 
-  return adj_matrix, attr_matrix, labels, label_mask
+    return adj_matrix, attr_matrix, labels, label_mask
 
 
 # From https://github.com/shchur/overlapping-community-detection/blob/master/nocd/data.py
@@ -311,7 +411,7 @@ def load_npz_dataset(file_name):
         if sp.issparse(Z):
             Z = Z.toarray().astype(np.float32)
             # Convert away from one-hot encoding
-            Z = np.argmax(Z, axis=1)
+            # Z = np.argmax(Z, axis=1)
 
         graph = {
             'A': A,

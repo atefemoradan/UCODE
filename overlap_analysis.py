@@ -5,6 +5,7 @@ import pickle as pkl
 import networkx as nx
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 from sklearn.metrics.cluster import normalized_mutual_info_score
 from Lossfunction import loss_modularity_trace
@@ -13,7 +14,7 @@ import os
 import copy
 from sklearn import metrics
 from utils import precision
-from utils import recall
+from utils import disjoint_recall, overlap_recall, overlap_nmi
 from matplotlib import pyplot as plt
 from matplotlib.patches import Patch
 
@@ -29,7 +30,6 @@ class OverlapAnalyzer:
     def __init__(
         self,
         epochs=500,
-        num_iters=16,
         hid_units=16,
         overlap_name='fb_1684',
         disjoint_name='cora'
@@ -41,12 +41,8 @@ class OverlapAnalyzer:
         self.overlap_name = overlap_name
         self.overlap_data = {}
 
-        # FIXME FIXME FIXME -- what is the n_communities of each dataset??
-        # It's the length of the one-hot, yes?
-        self.hid_units = hid_units
         self.epochs = epochs
-        self.num_iters = num_iters
-        self.x_ent = nn.BCEWithLogitsLoss()
+        self.x_ent = nn.BCELoss()
 
         self._get_disjoint_data()
         self._get_overlap_data()
@@ -80,6 +76,7 @@ class OverlapAnalyzer:
         self.disjoint_data['B'] = B
         self.disjoint_data['m'] = len(nx.Graph(graph).edges)
         self.disjoint_data['nb_nodes'] = nb_nodes
+        self.disjoint_data['hid_units'] = labels.shape[-1]
         self.disjoint_data['ft_size'] = ft_size
 
     def _get_overlap_data(self):
@@ -105,16 +102,20 @@ class OverlapAnalyzer:
         self.overlap_data['B'] = B
         self.overlap_data['m'] = m
         self.overlap_data['nb_nodes'] = nb_nodes
+        self.overlap_data['hid_units'] = labels.shape[-1]
         self.overlap_data['ft_size'] = ft_size
 
-    def base_loss(self, logits, data):
+    def loss(self, logits, data):
         logits_T = logits.transpose(1, 2)
         modularity = torch.matmul(torch.matmul(logits_T, data['B']), logits)
 
-        idx = np.random.permutation(self.hid_units)
+        # ANDREW - Uncomment this to make modularity matrix > 0 for each element
+        # modularity -= torch.min(modularity, dim=1, keepdims=True)[0]
+
+        idx = np.random.permutation(data['hid_units'])
         shuf_fts = modularity[:, idx, :]
-        lbl_1 = torch.ones(1, self.hid_units)
-        lbl_2 = torch.zeros(1, self.hid_units)
+        lbl_1 = torch.ones(1, data['hid_units'])
+        lbl_2 = torch.zeros(1, data['hid_units'])
         lbl = torch.cat((lbl_2, lbl_1), 1)
         diag1 = torch.div(torch.diag(modularity[0], 0), data['m'])
         diag2 = torch.div(torch.diag(shuf_fts[0], 0), data['m'])
@@ -129,49 +130,15 @@ class OverlapAnalyzer:
         if torch.cuda.is_available():
             shuf_fts = shuf_fts.cuda()
             lbl = lbl.cuda()
+
+        # ANDREW - this is the loss defined on line 45
         loss = self.x_ent(diags, lbl)
-        loss.requires_grad_(True)
-        return loss
 
-    def sort_loss(self, logits, data, contrast_value):
-        logits_T = logits.transpose(1, 2)
-        modularity = torch.matmul(torch.matmul(logits_T, data['B']), logits)
-
-        lbl = torch.cat((
-            torch.ones(1, self.hid_units),
-            torch.zeros(1, self.hid_units)
-        ), 1)
-
-        attractive = torch.div(torch.diag(modularity[0], 0), data['m'])
-        inds = torch.argsort(modularity, dim=1)
-        sort_mask = inds == contrast_value
-        repulsive = torch.masked_select(modularity, sort_mask)
-        repulsive = torch.div(repulsive, data['m'])
-
-        diags = torch.cat((attractive, repulsive), 0)
-        diags = diags.unsqueeze(0)
-        if torch.cuda.is_available():
-            shuf_fts = shuf_fts.cuda()
-            lbl = lbl.cuda()
-            diags = diags.cuda()
-
-        if torch.cuda.is_available():
-            shuf_fts = shuf_fts.cuda()
-            lbl = lbl.cuda()
-        loss = self.x_ent(diags, lbl)
         loss.requires_grad_(True)
         return loss
 
     def _get_empty_dicts(self):
-        dataset_scores = {
-            'nmi': [],
-            'modularity': [],
-            'conductance': [],
-            'completeness': [],
-            'precision': [],
-            'recall': [],
-            'Fscore': [],
-        }
+        dataset_scores = {'nmi': [], 'recall': []}
         scores_dict = {
             'disjoint': copy.deepcopy(dataset_scores),
             'overlap': copy.deepcopy(dataset_scores)
@@ -185,90 +152,96 @@ class OverlapAnalyzer:
 
     def analyze_overlap(self):
         scores_dict, dataset_dict = self._get_empty_dicts()
-        for i in range(1, self.num_iters):
-            for mode in ['disjoint', 'overlap']:
-                data = dataset_dict[mode]
-                model = None
-                model = GCN(data['ft_size'], self.hid_units, data['nb_nodes'])
+        for mode in ['disjoint', 'overlap']:
+            data = dataset_dict[mode]
+            for i in (list(range(16, data['hid_units'], 8)) + [62]):
+                model = GCN(data['ft_size'], data['hid_units'], data['nb_nodes'])
                 if torch.cuda.is_available():
                     model.cuda()
-                optimiser = torch.optim.Adam(
+                optimizer = torch.optim.Adam(
                     model.parameters(),
                     lr=0.001,
                     weight_decay=0.001
                 )
+                lr_sched = torch.optim.lr_scheduler.StepLR(
+                    optimizer,
+                    step_size=75,
+                    gamma=0.5,
+                )
                 model.train()
-                for epoch in range(self.epochs):
-                    optimiser.zero_grad()
+                for epoch in range(self.epochs + 1):
+                    optimizer.zero_grad()
 
                     logits = model(data['features'], data['adj'])
-                    loss = self.sort_loss(logits, data, i)
-                    # loss = self.base_loss(logits, data)
+                    loss = self.loss(torch.exp(logits), data)
                     loss.backward()
-                    optimiser.step()
+                    optimizer.step()
 
                     embeds = logits.view(
                         data['nb_nodes'],
-                        self.hid_units
+                        data['hid_units']
                     ).detach().cpu().numpy()
-                    kmeans = KMeans(
-                        init='k-means++',
-                        n_clusters=data['n_communities'],
-                        random_state=0
-                    ).fit(embeds)
-                    nmi_kmean = normalized_mutual_info_score(data['labels'], kmeans.labels_)
-                    print(epoch, '---', nmi_kmean)
+                    if mode == 'disjoint':
+                        # kmeans = KMeans(
+                        #     init='k-means++',
+                        #     n_clusters=data['n_communities'],
+                        #     random_state=0
+                        # ).fit(embeds)
+                        # preds = kmeans.labels_
+                        preds = np.argmax(embeds, axis=-1)
+                        nmi = normalized_mutual_info_score(data['labels'], preds)
+                        recall = disjoint_recall(data['labels'], preds)
+                    else:
+                        logits = logits.cpu().detach().numpy()
+                        # thresh = np.mean(logits, axis=-1, keepdims=True)
+                        thresh = np.mean(logits, axis=-1, keepdims=True)
+                        preds =  np.squeeze(logits > thresh)
+                        nmi = overlap_nmi(data['labels'], preds)
+                        recall = overlap_recall(
+                            data['labels'],
+                            preds,
+                            data['n_communities']
+                        )
+                    lr_sched.step()
+                    if epoch % 25 == 0:
+                        np_loss = loss.cpu().detach().numpy()
+                        output = '--- {} loss: {:.03f} - nmi: {:.04f} - recall: {:.04f}'
+                        print(epoch, output.format(mode, np_loss, nmi, recall))
 
-                np_adj = torch.squeeze(data['adj']).detach().numpy()
-                modularity = com.modularity(np_adj, kmeans.labels_)
-                conductance = com.conductance(np_adj, kmeans.labels_)
-                p = precision(data['labels'], kmeans.labels_)
-                r = recall(data['labels'], kmeans.labels_)
-                completeness = metrics.completeness_score(data['labels'], kmeans.labels_)
-                F_score = 2 * ((r * p) / (r + p))
-
-                scores_dict[mode]['nmi'].append(nmi_kmean)
-                scores_dict[mode]['modularity'].append(modularity)
-                scores_dict[mode]['conductance'].append(conductance)
-                scores_dict[mode]['completeness'].append(completeness)
-                scores_dict[mode]['precision'].append(p)
-                scores_dict[mode]['recall'].append(r)
-                scores_dict[mode]['Fscore'].append(F_score)
+                scores_dict[mode]['nmi'].append(nmi)
+                scores_dict[mode]['recall'].append(recall)
+                print('\n')
 
         np.save('overlap_analysis_results.npy', scores_dict)
 
-def make_plots(path, num_iters):
+def make_plots(path):
     scores_dict = np.load(path, allow_pickle=True)[()]
-    x_vals = np.arange(1, num_iters)
     modes = ['disjoint', 'overlap']
-    cmap = dict(zip(modes, ['b', 'g']))
-    patches = [Patch(color=v, label=k) for k, v in cmap.items()]
-    for i, key in enumerate(scores_dict['disjoint']):
-        disjoint_scores = scores_dict['disjoint'][key]
-        overlap_scores = scores_dict['overlap'][key]
+    for mode in modes:
+        for i, key in enumerate(scores_dict[mode]):
+            scores = scores_dict[mode][key]
 
-        ax = plt.subplot(111)
-        ax.bar(x_vals - 0.15, disjoint_scores, width=0.3, color='b', align='center')
-        ax.bar(x_vals + 0.15, overlap_scores, width=0.3, color='g', align='center')
-        ax.set_ylim([0.0, max([max(disjoint_scores), max(overlap_scores)]) * 1.2])
-        plt.title('Effect of contrastive index on %s' % key)
-        plt.legend(
-            labels=modes,
-            handles=patches,
-            loc='upper center',
-            ncol=num_iters - 1,
-            borderaxespad=0,
-            fontsize=15,
-        )
-        plt.xticks(x_vals)
-        plt.xlabel('Contrastive index')
-        plt.ylabel(key)
+            x_vals = np.arange(len(scores)) + 1
+            ax = plt.subplot(111)
+            ax.bar(
+                x_vals,
+                scores,
+                width=0.3,
+                color='b',
+                align='center'
+            )
+            ax.set_ylim([min(scores) * 0.8, max(scores) * 1.2])
 
-        plt.savefig(os.path.join('analysis_figs', '{}.png'.format(key)))
-        plt.clf()
+            plt.title('Effect of contrastive index on %s' % key)
+            plt.xticks(x_vals)
+            plt.xlabel('Contrastive index')
+            plt.ylabel(key)
+
+            plt.savefig(os.path.join('analysis_figs', '{}_{}.png'.format(mode, key)))
+            plt.clf()
 
 if __name__ == '__main__':
-    # analyzer = OverlapAnalyzer(num_iters=16)
-    # analyzer.analyze_overlap()
+    analyzer = OverlapAnalyzer()
+    analyzer.analyze_overlap()
 
-    make_plots('overlap_analysis_results.npy', 16)
+    # make_plots('overlap_analysis_results.npy')
