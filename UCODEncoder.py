@@ -52,12 +52,12 @@ class GCN(nn.Module):
         # return seq_fts2
 
         # ANDREW - Uncomment this to use logsoftmax
-        # out2 = self.act1(seq_fts2)
+        out2 = self.act1(seq_fts2)
 
         # ANDREW - Uncomment this to use traditional softmax
         # out2 = nn.Softmax(dim=2)(seq_fts2)
 
         # ANDREW - Uncomment this to return linear outputs
-        out2 = seq_fts2
+        # out2 = seq_fts2
 
         return out2

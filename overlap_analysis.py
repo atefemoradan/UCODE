@@ -42,7 +42,9 @@ class OverlapAnalyzer:
         self.overlap_data = {}
 
         self.epochs = epochs
-        self.x_ent = nn.BCELoss()
+
+        self.x_ent = nn.BCEWithLogitsLoss()
+        # self.x_ent = nn.BCELoss()
 
         self._get_disjoint_data()
         self._get_overlap_data()
