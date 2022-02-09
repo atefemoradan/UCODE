@@ -15,7 +15,7 @@ import os
 from sklearn.metrics.cluster import contingency_matrix
 from scipy.sparse import csr_matrix
 
-path=os.path.dirname(os.path.abspath(__file__))+'/venv'
+path=os.path.dirname(os.path.abspath(__file__))+'/venv/'
 # From Dmon Model
 def _compute_counts(y_true, y_pred):  #
   contingency = contingency_matrix(y_true, y_pred)

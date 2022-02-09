@@ -34,8 +34,8 @@ type --> kipf or npz
 If the modularity matrix (B) is saved in the system existB would be equal to 1"""
 
 """Set the path of the dataset folder"""
-path=os.path.dirname(os.path.abspath(__file__))
-type="kipf"
+path=os.path.dirname(os.path.abspath(__file__))+'/venv/'
+type='kipf'
 dataset ='cora'
 ncommunity=7
 hid_units =16
@@ -55,7 +55,10 @@ def datapreprocessing():
     features = sparse.csr_matrix(features)
   nb_nodes = features.shape[0]
   ft_size = features.shape[1]
-  #nb_classes = labels.shape[1]
+  """print(ft_size)
+  print(nb_nodes)
+  print(features.shape)
+  nb_classes = labels.shape[1]"""
   m=len(network.edges)
   if existB==0:
     B=com.get_B(network)
@@ -63,7 +66,6 @@ def datapreprocessing():
     adj_metric=adj
     np.save(path+'dataset/Modularity-'+dataset+'npy',B)
   else:
-    #B=np.load(path+"dataset/Modularity-matrix-"+str(dataset)+'.npy')
     B = np.load(path+'dataset/Modularity-'+dataset+'.npy')
     adj_metric = adj
   if type=="npz":
@@ -75,10 +77,9 @@ def datapreprocessing():
 
 
 def training():
-
   features,adj,B,labels_clus,nb_nodes,ft_size,adj_metric,m=datapreprocessing()
   nmilist,modularitylist,conductancelist,cslist,precisionlist,recallist,Fscorelist,nmikmean=[],[],[],[],[],[],[],[]
-  for i in range(1):
+  for i in range(10):
     model = None
     model = GCN(ft_size, hid_units, nb_nodes)
     #lr=0.0001, weight_decay=0.000001
@@ -95,36 +96,33 @@ def training():
       optimiser.zero_grad()
       logits = model(features, adj)
       loss = loss_modularity_trace(logits, B, ncommunity,hid_units,m)
-      #logits1 = torch.exp(logits)
-      #labels = torch.argmax(logits1[0], dim=1).detach().cpu().numpy()
-      #nmi=normalized_mutual_info_score(labels_clus, labels)
-      #print(nmi)
-      #print('Loss:', loss.item())
+      logits = torch.exp(logits)
+      labels = torch.argmax(logits[0], dim=1).detach().cpu().numpy()
+      nmi=normalized_mutual_info_score(labels_clus, labels)
+      print('Loss:', loss.item())
+      print('NMI:,',nmi)
       loss.backward()
       optimiser.step()
-      embeds1 = logits.view(nb_nodes, hid_units).detach().cpu().numpy()
-      kmeans1 = KMeans(init='k-means++', n_clusters=ncommunity, random_state=0).fit(embeds1)
-      nmikmean1 = normalized_mutual_info_score(labels_clus, kmeans1.labels_)
-      print(nmikmean1)
-      #labels = torch.argmax(logits [0], dim=1).detach().cpu().numpy()
-      #nmilist.append(normalized_mutual_info_score(labels_clus, labels))
+    logits = torch.exp(logits)
+    labels = torch.argmax(logits [0], dim=1).detach().cpu().numpy()
+    nmilist.append(normalized_mutual_info_score(labels_clus, labels))
     torch.save(model, path+'model/'+dataset+'_model.pt')
-    modularitylist.append(com.modularity(adj_metric,kmeans1.labels_))
-    conductancelist.append(com.conductance(adj_metric,kmeans1.labels_))
-    cslist.append(metrics.completeness_score(labels_clus, kmeans1.labels_))
-    p=precision(labels_clus, kmeans1.labels_)
-    r=recall(labels_clus,kmeans1.labels_)
+    modularitylist.append(com.modularity(adj_metric,labels))
+    conductancelist.append(com.conductance(adj_metric,labels))
+    cslist.append(metrics.completeness_score(labels_clus,labels))
+    p=precision(labels_clus,labels)
+    r=recall(labels_clus,labels)
     precisionlist.append(p)
     recallist.append(r)
     Fscorelist.append(2*((r*p)/(r+p)))
     embeds1 = logits.view(nb_nodes, hid_units).detach().cpu().numpy()
-    kmeans1 = KMeans(init='k-means++', n_clusters=ncommunity, random_state=0).fit(embeds1)
-    nmikmean.append (normalized_mutual_info_score(labels_clus, kmeans1.labels_))
+    #kmeans1 = KMeans(init='k-means++', n_clusters=ncommunity, random_state=0).fit(embeds1)
+    #nmikmean.append (normalized_mutual_info_score(labels_clus, kmeans1.labels_))
+    print(nmilist)
     np.save(path + '/dataset/coductance'+dataset+'.npy', conductancelist)
     np.save(path + '/dataset/fscore+'+dataset+'.npy', Fscorelist)
     np.save(path + '/dataset/modularity'+dataset+'.npy', modularitylist)
     np.save(path + '/dataset/nmi'+dataset+'.npy', nmikmean)
-    print(nmikmean1)
 
 
 
