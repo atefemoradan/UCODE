@@ -1,2 +1,5 @@
 /venv/
+dataset/
+__pycache__/
+*.pyc
 /.idea/
