@@ -11,7 +11,6 @@ class GCN(nn.Module):
         self.batch_2 = nn.BatchNorm1d(num_features=nb_nodes)
 
         self.act_1 = nn.SELU()
-        self.act_2 = nn.SELU()
         self.logsoftmax = nn.LogSoftmax(dim=2)
 
         self.bias = nn.Parameter(torch.FloatTensor(out_ft))
@@ -34,8 +33,14 @@ class GCN(nn.Module):
 
         h = self.fc_2(h)
         h = torch.bmm(adj, h)
-        h = self.act_2(h)
         h = self.batch_2(h)
+        h = torch.abs(h)
 
+        # This works well but is not what we say in the theory section
         output = self.logsoftmax(h)
+
+        # This is what we say in the theory section but does not give as good results
+        # norm = torch.sum(h, dim=-1, keepdim=True)
+        # norm[norm <= 0.0001] = 1
+        # output = h / norm
         return output

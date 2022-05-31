@@ -155,8 +155,8 @@ def run_nonoverlapping():
     path=os.path.dirname(os.path.abspath(__file__))+'/venv/'
     dataset_dict = {
         'cora': 7,
-        'pubmed': 3,
         'citeseer': 6,
+        'pubmed': 3,
     }
     hid_units=16
     epochs=500
