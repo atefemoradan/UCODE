@@ -124,7 +124,6 @@ def get_B(G):
     if type(G) == nx.Graph:
             # for undirected graphs, in and out treated as the same thing
             out_degree = in_degree = dict(nx.degree(G))
-            print(out_degree)
             M = 2.*(G.number_of_edges())
             print("Calculating modularity for undirected graph")
     elif type(G) == nx.DiGraph:
@@ -199,7 +198,7 @@ def conductance(adjacency, clusters):
     return intra / (inter + intra)
 
 def modularity(adjacency, clusters):
-    degrees = adjacency.sum(axis=0).A1
+    degrees = adjacency.sum(axis=0)
     m = degrees.sum()
     result = 0
     for cluster_id in np.unique(clusters):
@@ -209,6 +208,59 @@ def modularity(adjacency, clusters):
         result += np.sum(adj_submatrix) - (np.sum(degrees_submatrix)**2) / m
     return result / m
 
+def overlap_nmi(X, Y):
+    if not ((X == 0) | (X == 1)).all():
+        raise ValueError("X should be a binary matrix")
+    if not ((Y == 0) | (Y == 1)).all():
+        raise ValueError("Y should be a binary matrix")
+
+    # if X.shape[1] > X.shape[0] or Y.shape[1] > Y.shape[0]:
+    #     warnings.warn("It seems that you forgot to transpose the F matrix")
+    X = X.T
+    Y = Y.T
+    def cmp(x, y):
+        """Compare two binary vectors."""
+        a = (1 - x).dot(1 - y)
+        d = x.dot(y)
+        c = (1 - y).dot(x)
+        b = (1 - x).dot(y)
+        return a, b, c, d
+
+    def h(w, n):
+        """Compute contribution of a single term to the entropy."""
+        if w == 0:
+            return 0
+        else:
+            return -w * np.log2(w / n)
+
+    def H(x, y):
+        """Compute conditional entropy between two vectors."""
+        a, b, c, d = cmp(x, y)
+        n = len(x)
+        if h(a, n) + h(d, n) >= h(b, n) + h(c, n):
+            return h(a, n) + h(b, n) + h(c, n) + h(d, n) - h(b + d, n) - h(a + c, n)
+        else:
+            return h(c + d, n) + h(a + b, n)
+    def H_uncond(X):
+        """Compute unconditional entropy of a single binary matrix."""
+        return sum(h(x.sum(), len(x)) + h(len(x) - x.sum(), len(x)) for x in X)
+
+    def H_cond(X, Y):
+        """Compute conditional entropy between two binary matrices."""
+        m, n = X.shape[0], Y.shape[0]
+        scores = np.zeros([m, n])
+        for i in range(m):
+            for j in range(n):
+                scores[i, j] = H(X[i], Y[j])
+        return scores.min(axis=1).sum()
+
+    if X.shape[1] != Y.shape[1]:
+        raise ValueError("Dimensions of X and Y don't match. (Samples must be stored as COLUMNS)")
+    H_X = H_uncond(X)
+    H_Y = H_uncond(Y)
+    I_XY = 0.5 * (H_X + H_Y - H_cond(X, Y) - H_cond(Y, X))
+    return I_XY / max(H_X, H_Y)
+
 def convert_torch_npz(adj,features,B,labels):
     features, _ = preprocess_features(features)
     B = torch.FloatTensor(B[np.newaxis])
@@ -216,10 +268,8 @@ def convert_torch_npz(adj,features,B,labels):
     adj = (adj + sp.eye(adj.shape[0])).todense()
     features = torch.FloatTensor(features[np.newaxis])
     adj = torch.FloatTensor(adj[np.newaxis])
-    #labels = torch.FloatTensor(labels[np.newaxis])
     labels_clus=labels
-    #labels_clus=torch.argmax(labels[0],dim=1).detach().cpu().numpy()
-    return features,adj,B,labels_clus
+    return features, adj, B, labels_clus
 
 def convert_torch_kipf(adj,features,B,labels):
     features, _ = preprocess_features(features)
@@ -231,12 +281,11 @@ def convert_torch_kipf(adj,features,B,labels):
     labels = torch.FloatTensor(labels[np.newaxis])
     labels_clus=labels
     labels_clus=torch.argmax(labels[0],dim=1).detach().cpu().numpy()
-    return features,adj,B,labels_clus
+    return features, adj, B, labels_clus
 
 def load_npz_to_sparse_graph(file_name):    # pylint: disable=missing-function-docstring
     with np.load(open(file_name, 'rb'), allow_pickle=True) as loader:
         loader = dict(loader)
-        print(loader.keys())
         adj_matrix = csr_matrix(
                 (loader['adj_matrix.data'], loader['adj_matrix.indices'], loader['adj_matrix.indptr']),
                 shape=loader['adj_matrix.shape'])
@@ -257,7 +306,7 @@ def load_npz_to_sparse_graph(file_name):    # pylint: disable=missing-function-d
             labels = csr_matrix((loader['labels.data'], loader['labels.indices'],
                                                      loader['labels.indptr']),
                                                     shape=loader['labels.shape'])
-            label_mask = labels.nonzero()[0]
+            label_mask = (labels > 0).toarray().astype(np.int32)
             labels = labels.nonzero()[1]
         elif 'labels' in loader:
             # Labels are stored as a numpy array
@@ -266,5 +315,4 @@ def load_npz_to_sparse_graph(file_name):    # pylint: disable=missing-function-d
         else:
             raise Exception('No labels in the data file', file_name)
 
-    print(labels.shape)
     return adj_matrix, attr_matrix, labels, label_mask
