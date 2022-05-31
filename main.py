@@ -135,7 +135,7 @@ def train(
                 r = utils.recall(true_labels, kmeans_preds)
                 kmeans_Fscore_list[i] = 2 * (r * p) / (r + p)
 
-
+        print('\n')
         if data_type == 'npz':
             print('NMI:', np.mean(nmi_list), np.std(nmi_list))
         else:
@@ -179,5 +179,5 @@ def run_overlapping():
     train(dataset_dict, hid_units, data_type, path, epochs=epochs)
 
 if __name__ == '__main__':
-    # run_nonoverlapping()
-    run_overlapping()
+    run_nonoverlapping()
+    # run_overlapping()
