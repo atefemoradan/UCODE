@@ -29,8 +29,8 @@ If the modularity matrix (B) is saved in the system existB would be equal to 1""
 """Set the path of the dataset folder"""
 path=os.path.dirname(os.path.abspath(__file__))+'/venv/'
 type='npz'
-dataset ='fb_1684'
-ncommunity=17
+dataset ='cora'
+ncommunity=7
 hid_units=16
 existB=1
 epochs=500
