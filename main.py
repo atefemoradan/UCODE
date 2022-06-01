@@ -55,7 +55,9 @@ def train(
     path,
     epochs=500,
     num_experiments=5,
-    _overlap_threshold=-1
+    _overlap_threshold=-1,
+    concatenate_adj=True,
+    do_logsoftmax=True
 ):
     for data_name, n_communities in tqdm(dataset_dict.items()):
         print(data_name)
@@ -72,8 +74,12 @@ def train(
             modularity_list, kmeans_modularity_list = np.zeros(num_experiments), np.zeros(num_experiments)
             Fscore_list, kmeans_Fscore_list = np.zeros(num_experiments), np.zeros(num_experiments)
 
+        if concatenate_adj:
+            features = torch.cat([features, adj], axis=2)
+            ft_size = ft_size + int(adj.shape[-1])
+
         for i in tqdm(range(num_experiments)):
-            model = GCN(ft_size, hid_units, nb_nodes)
+            model = GCN(ft_size, hid_units, nb_nodes, do_logsoftmax=do_logsoftmax)
             optimiser = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=0.0005)
             if torch.cuda.is_available():
                 model.cuda()
@@ -93,7 +99,7 @@ def train(
             # Get predictions at the end of training
             model.eval()
             logits = model(features, adj)
-            # logits = torch.exp(logits)
+            logits = torch.exp(logits)
             cpu_logits = logits.view(nb_nodes, hid_units).detach().cpu().numpy()
             preds = torch.argmax(logits[0], dim=1).detach().cpu().numpy()
 
@@ -137,7 +143,7 @@ def train(
 
         print('\n')
         if data_type == 'npz':
-            print('NMI:', np.mean(nmi_list), np.std(nmi_list))
+            print('Overlapping NMI:', np.mean(nmi_list), np.std(nmi_list))
         else:
             print('Baseline scores:')
             print('NMI:', np.mean(nmi_list), np.std(nmi_list))
@@ -179,5 +185,5 @@ def run_overlapping():
     train(dataset_dict, hid_units, data_type, path, epochs=epochs)
 
 if __name__ == '__main__':
-    run_nonoverlapping()
-    # run_overlapping()
+    # run_nonoverlapping()
+    run_overlapping()
