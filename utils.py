@@ -208,6 +208,8 @@ def modularity(adjacency, clusters):
         result += np.sum(adj_submatrix) - (np.sum(degrees_submatrix)**2) / m
     return result / m
 
+# Followings are for overlapping community
+
 def overlap_nmi(X, Y):
     if not ((X == 0) | (X == 1)).all():
         raise ValueError("X should be a binary matrix")
