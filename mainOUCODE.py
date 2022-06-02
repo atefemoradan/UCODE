@@ -21,7 +21,7 @@ import scipy.sparse as sp
 from scipy.sparse import csr_matrix
 from scipy.sparse import lil_matrix
 import os
-from UCODEncoder import GCN
+from OverlappingEncoder import GCN
 
 if torch.cuda.is_available():
     device='gpu'
@@ -30,12 +30,12 @@ else:
 
 
 path= os.path.dirname(os.path.abspath(__file__))
-existB=1
+exist_B=0
 
 
 
 
-def datapreprocessing(overlapmodel,path, dataset, exist_B=1):
+def datapreprocessing(overlapmodel,path, dataset, exist_B):
   loader = com.load_overlapping_dataset(path + '/dataset/Overlappingdatasets/' + dataset)
   A, X, Z_gt = loader['A'], loader['X'], loader['Z']
   N, K = Z_gt.shape
@@ -50,10 +50,11 @@ def datapreprocessing(overlapmodel,path, dataset, exist_B=1):
     x_norm = com.to_sparse_tensor(x_norm)
   """calculate-B-Matrix"""
   network = nx.from_scipy_sparse_matrix(A)
-  if existB:
+  if exist_B == 0:
     B = com.get_B(network)
+    np.save(path + '/dataset/Overlappingdatasets/Modularity-' + dataset, B)
   else:
-    B = np.load(path + '/dataset/Overlappingdatasets/' + dataset)
+    B = np.load(path + '/dataset/Overlappingdatasets/Modularity-' + dataset + '.npy')
   B = torch.FloatTensor(B)
   m = 2 * len(network.edges)
   return x_norm,A,B,Z_gt,m
@@ -70,7 +71,7 @@ def train(dataset_dict,
   for data_name, n_communities in tqdm(dataset_dict.items()):
     print(data_name)
 
-    preprocessed_data = datapreprocessing(overlapmodel,path, data_name, exist_B=1)
+    preprocessed_data = datapreprocessing(overlapmodel,path, data_name, exist_B)
     x_norm_i, A, B, Z_gt, m = preprocessed_data
     c = Z_gt.shape[1]
     adj_norm = com.normalize_overlap_adj(A)
@@ -101,7 +102,7 @@ def train(dataset_dict,
       preds = logits > thresh
       preds=np.squeeze(preds, axis=0)
       nmi=com.overlap_nmi(Z_gt,preds)
-      print(nmi)
+      print('NMI :'+ str(nmi))
       recall=com.ORecall(thresh,preds,c,Z_gt)
       recall_list[i]=recall
       nmi_list[i] = nmi
@@ -114,7 +115,7 @@ def train(dataset_dict,
 def run_overlapping():
   path=os.path.dirname(os.path.abspath(__file__))
   dataset_dict = {
-      'fb_348': 14
+      'fb_1684': 17
 
   }
   overlapmodel='UCODE-G'
