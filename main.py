@@ -11,7 +11,6 @@ import networkx as nx
 from networkx.generators.degree_seq import expected_degree_graph
 
 from sklearn.cluster import KMeans
-#from umap import UMAP
 import torch.nn as nn
 import numpy as np
 import scipy.sparse as sp
@@ -31,6 +30,7 @@ def datapreprocessing(data_type, path, dataset, exist_B):
         adj, features, labels, label_mask = utils.load_npz_to_sparse_graph(path + '/dataset/' + dataset + '.npz')
         network = nx.from_scipy_sparse_matrix(adj)
         features = sparse.csr_matrix(features)
+    adj_metric=adj
     nb_nodes = features.shape[0]
     ft_size = features.shape[1]
     m = len(network.edges)
@@ -46,7 +46,7 @@ def datapreprocessing(data_type, path, dataset, exist_B):
     elif data_type=="npz":
         features, adj, B, true_labels = utils.convert_torch_npz(adj, features, B, labels)
 
-    return features, adj, B, true_labels, label_mask, nb_nodes, ft_size, adj, m
+    return features, adj, B, true_labels, label_mask, nb_nodes, ft_size, adj_metric, m
 
 def train(
     dataset_dict,
@@ -55,23 +55,21 @@ def train(
     data_type,
     path,
     exist_B,
-    epochs=500,
-    num_experiments=5,
+    epochs=5,
+    num_experiments=1,
     _overlap_threshold=-1
 ):
     for data_name, n_communities in tqdm(dataset_dict.items()):
         print(data_name)
         preprocessed_data = datapreprocessing(data_type, path, data_name,exist_B)
-        features, adj, B, true_labels, label_mask, nb_nodes, ft_size, adj, m = preprocessed_data
+        features, adj, B, true_labels, label_mask, nb_nodes, ft_size, adj_metric, m = preprocessed_data
         print(features.shape)
-        print(adj.shape)
         nmi_list = np.zeros(num_experiments)
 
         kmeans_nmi_list = np.zeros(num_experiments)
         cond_list, kmeans_cond_list = np.zeros(num_experiments), np.zeros(num_experiments)
         modularity_list, kmeans_modularity_list = np.zeros(num_experiments), np.zeros(num_experiments)
         Fscore_list, kmeans_Fscore_list = np.zeros(num_experiments), np.zeros(num_experiments)
-
 
         for i in tqdm(range(num_experiments)):
             model = GCN(ft_size, hid_units, nb_nodes,hid_dimension)
@@ -114,11 +112,12 @@ def train(
             kmeans_nmi_list[i] = kmeans_nmi
             nmi_list[i] = nmi
 
-            cpu_adj = adj[0].detach().cpu().numpy() # adj[0] to get rid of the batch dimension
-            cond_list[i] = utils.conductance(cpu_adj, preds)
-            kmeans_cond_list[i] = utils.conductance(cpu_adj, kmeans_preds)
-            modularity_list[i] = utils.modularity(cpu_adj, preds)
-            kmeans_modularity_list[i] = utils.modularity(cpu_adj, kmeans_preds)
+            #cpu_adj = adj[0].detach().cpu().numpy() # adj[0] to get rid of the batch dimension
+
+            cond_list[i] = utils.conductance(adj_metric, preds)
+            kmeans_cond_list[i] = utils.conductance(adj_metric, kmeans_preds)
+            modularity_list[i] = utils.modularity(adj_metric, preds)
+            kmeans_modularity_list[i] = utils.modularity(adj_metric, kmeans_preds)
             p = utils.precision(true_labels, preds)
             r = utils.recall(true_labels, preds)
             Fscore_list[i] = 2 * (r * p) / (r + p)
@@ -143,14 +142,14 @@ def train(
 def run_nonoverlapping():
     path=os.path.dirname(os.path.abspath(__file__))
     dataset_dict = {
-        'cora':7
+        'citeseer':6
     }
 
-    hid_units=16
+    hid_units=16 # This is the output
     hid_dimension=256
     epochs=500
-    data_type='npz'
-    exist_B=0
+    data_type='kipf'
+    exist_B=1
     train(dataset_dict, hid_units,hid_dimension, data_type, path,exist_B, epochs=epochs)
 
 
