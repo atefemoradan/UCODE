@@ -19,6 +19,7 @@ from sklearn.metrics.cluster import normalized_mutual_info_score
 from scipy import sparse
 from sklearn import metrics
 
+#
 def datapreprocessing(data_type, path, dataset, exist_B):
     if data_type == 'kipf':
         adj, features, labels = utils.load_data(dataset)
