@@ -58,7 +58,6 @@ def train(
     exist_B,
     epochs=5,
     num_experiments=5,
-    _overlap_threshold=-1
 ):
     for data_name, n_communities in tqdm(dataset_dict.items()):
         preprocessed_data = datapreprocessing(data_type, path, data_name,exist_B)
@@ -110,8 +109,6 @@ def train(
             kmeans_nmi_list[i] = kmeans_nmi
             nmi_list[i] = nmi
 
-            #cpu_adj = adj[0].detach().cpu().numpy() # adj[0] to get rid of the batch dimension
-
             cond_list[i] = utils.conductance(adj_metric, preds)
             kmeans_cond_list[i] = utils.conductance(adj_metric, kmeans_preds)
             modularity_list[i] = utils.modularity(adj_metric, preds)
@@ -159,7 +156,6 @@ def run_nonoverlapping():
         exist_B,
         epochs=epochs
     )
-
 
 
 if __name__ == '__main__':

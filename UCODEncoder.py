@@ -12,9 +12,6 @@ class GCN(nn.Module):
 
         self.act_1 = nn.SELU()
         self.act_2 = nn.ReLU()
-        self.do_lsf = do_logsoftmax
-        if self.do_lsf:
-            self.logsoftmax = nn.LogSoftmax(dim=2)
 
         self.bias = nn.Parameter(torch.FloatTensor(out_ft))
         self.bias.data.fill_(0.0)
@@ -44,6 +41,7 @@ class GCN(nn.Module):
 
         # Linear rescale activation. Need to change learning rate, etc. to maintain results
         # norm = torch.sum(h, dim=-1, keepdim=True)
+        # FIXME -- must be better way to avoid dividing by zero
         # norm[norm <= 0.0001] = 1
         # output = h / norm
 
