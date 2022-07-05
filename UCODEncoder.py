@@ -30,25 +30,16 @@ class GCN(nn.Module):
 
     def forward(self, seq, adj, sparse=False):
         seq_fts = self.fc(seq)
-        # seq_fts = self.batch(seq_fts)
-        if sparse:
-            out1 = torch.unsqueeze(torch.spmm(adj, torch.squeeze(seq_fts, 0)), 0)
-        else:
-            out1 = torch.bmm(adj, seq_fts)
-        # out1=self.dropout(out1)
+        out1 = torch.bmm(adj, seq_fts)
         out1 = self.act(out1)
-        # out1=self.dropout(out1)
         out1 = self.batch(out1)
 
         seq_fts1 = self.fc1(out1)
-        if sparse:
-            seq_fts2 = torch.unsqueeze(torch.spmm(adj, torch.squeeze(seq_fts1, 0)), 0)
-        else:
-            seq_fts2 = torch.bmm(adj, seq_fts1)
+        seq_fts2 = torch.bmm(adj, seq_fts1)
         seq_fts2 = self.batch1(seq_fts2)
         seq_fts2 = self.act2(seq_fts2)
-        out2 = self.act1(seq_fts2)
-        return out2
+        # out2 = self.act1(seq_fts2)
+        return seq_fts2
 
 ##
 class GCN1(nn.Module):

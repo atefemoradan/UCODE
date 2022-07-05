@@ -46,11 +46,11 @@ def datapreprocessing():
 
   if type=='kipf':
     adj, features, labels = com.load_data(dataset)
-    with open(path + "dataset/ind." + str(dataset) + ".graph", 'rb') as f:
+    with open(path + "/dataset/ind." + str(dataset) + ".graph", 'rb') as f:
       Graph = pkl.load(f, encoding='latin1')
     network = nx.Graph(Graph)
   elif type=="npz":
-    adj, features, labels, label_mask = com.load_npz_to_sparse_graph(path + 'dataset/' + dataset +'.npz')
+    adj, features, labels, label_mask = com.load_npz_to_sparse_graph(path + '/dataset/' + dataset +'.npz')
     network = nx.from_scipy_sparse_matrix(adj)
     features = sparse.csr_matrix(features)
   nb_nodes = features.shape[0]
@@ -61,10 +61,10 @@ def datapreprocessing():
     B=com.get_B(network)
     print(B.shape)
     adj_metric=adj
-    np.save(path+'dataset/Modularity-'+dataset+'npy',B)
+    np.save(path+'/dataset/Modularity-'+dataset+'npy',B)
   else:
     #B=np.load(path+"dataset/Modularity-matrix-"+str(dataset)+'.npy')
-    B = np.load(path+'dataset/Modularity-'+dataset+'.npy')
+    B = np.load(path+'/dataset/Modularity-'+dataset+'.npy')
     adj_metric = adj
   if type=="npz":
     features,adj,B,labels_clus=com.convert_torch_npz( adj,features,B,labels)
@@ -108,7 +108,11 @@ def training():
       print(nmikmean1)
       #labels = torch.argmax(logits [0], dim=1).detach().cpu().numpy()
       #nmilist.append(normalized_mutual_info_score(labels_clus, labels))
-    torch.save(model, path+'model/'+dataset+'_model.pt')
+    model.eval()
+    logits = model(features, adj)
+    embeds1 = logits.view(nb_nodes, hid_units).detach().cpu().numpy()
+    kmeans1 = KMeans(init='k-means++', n_clusters=ncommunity, random_state=0).fit(embeds1)
+    # torch.save(model, path+'model/'+dataset+'_model.pt')
     modularitylist.append(com.modularity(adj_metric,kmeans1.labels_))
     conductancelist.append(com.conductance(adj_metric,kmeans1.labels_))
     cslist.append(metrics.completeness_score(labels_clus, kmeans1.labels_))
