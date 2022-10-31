@@ -15,6 +15,8 @@ import os
 from sklearn.metrics.cluster import contingency_matrix
 from scipy.sparse import csr_matrix
 import torch.nn as nn
+import community as community_louvain
+
 
 path=os.path.dirname(os.path.abspath(__file__))+'/venv/'
 # From Dmon Model

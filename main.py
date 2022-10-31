@@ -19,7 +19,8 @@ from sklearn.metrics.cluster import normalized_mutual_info_score
 from scipy import sparse
 from sklearn import metrics
 
-#
+
+
 def datapreprocessing(data_type, path, dataset, exist_B):
     if data_type == 'kipf':
         adj, features, labels = utils.load_data(dataset)
@@ -56,10 +57,11 @@ def train(
     data_type,
     path,
     exist_B,
-    epochs=5,
-    num_experiments=1,
+    epochs=500,
+    num_experiments=9,
     _overlap_threshold=-1
 ):
+    sigmoidlogit = nn.Sigmoid()
     for data_name, n_communities in tqdm(dataset_dict.items()):
         print(data_name)
         preprocessed_data = datapreprocessing(data_type, path, data_name,exist_B)
@@ -74,7 +76,7 @@ def train(
 
         for i in tqdm(range(num_experiments)):
             model = GCN(ft_size, hid_units, nb_nodes,hid_dimension)
-            optimiser = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=0.0005)
+            optimiser = torch.optim.Adam(model.parameters(), lr=0.001,weight_decay=0.1)
             if torch.cuda.is_available():
                 model.cuda()
                 features = features.cuda()
@@ -86,18 +88,27 @@ def train(
                 model.train()
                 optimiser.zero_grad()
                 logits = model(features, adj)
-                loss = loss_modularity_trace(logits, B, n_communities, hid_units, m)
-                print('loss:',loss)
+                loss = loss_modularity_trace(logits, B, n_communities, hid_units, m,'non-overlap')
+                #print('loss:',loss)
                 loss.backward()
                 optimiser.step()
-
+                model.eval()
+                #logits = model(features, adj)
+                # logits = torch.exp(logits)
+                #logits = sigmoidlogit(logits)
+                #print(logits[0][0])
+                cpu_logits = logits.view(nb_nodes, hid_units).detach().cpu().numpy()
+                #preds = torch.argmax(logits[0], dim=1).detach().cpu().numpy()
+                #nmi = normalized_mutual_info_score(true_labels, preds)
+                #print('nmi:' + str(nmi))
             # Get predictions at the end of training
             model.eval()
             logits = model(features, adj)
-            logits = torch.exp(logits)
+            logits=sigmoidlogit(logits)
             cpu_logits = logits.view(nb_nodes, hid_units).detach().cpu().numpy()
             preds = torch.argmax(logits[0], dim=1).detach().cpu().numpy()
-
+            nmi = normalized_mutual_info_score(true_labels, preds)
+            print('nmi:'+str(nmi))
             # Fit kmeans to the output space
             kmeans_model = KMeans(
                 init='k-means++',
@@ -107,12 +118,10 @@ def train(
             kmeans_preds = kmeans_model.labels_
 
             # Calculate NMI
-
             nmi = normalized_mutual_info_score(true_labels, preds)
             kmeans_nmi = normalized_mutual_info_score(true_labels, kmeans_preds)
             kmeans_nmi_list[i] = kmeans_nmi
             nmi_list[i] = nmi
-
             #cpu_adj = adj[0].detach().cpu().numpy() # adj[0] to get rid of the batch dimension
 
             cond_list[i] = utils.conductance(adj_metric, preds)
@@ -143,16 +152,16 @@ def train(
 def run_nonoverlapping():
     path=os.path.dirname(os.path.abspath(__file__))
     dataset_dict = {
-        'citeseer':6
+        'cora':7
+
     }
 
     hid_units=16 # This is the output
-    hid_dimension=256
+    hid_dimension=512
     epochs=500
     data_type='kipf'
     exist_B=1
     train(dataset_dict, hid_units,hid_dimension, data_type, path,exist_B, epochs=epochs)
-
 
 
 if __name__ == '__main__':

@@ -11,9 +11,10 @@ class GCN(nn.Module):
         self.dropout = nn.Dropout(p=0.1)
         self.batch = nn.BatchNorm1d(num_features=nb_nodes)
 
-        self.act = nn.SELU()
-        self.act1 = nn.LogSoftmax(dim=2)
-        self.act2 = nn.ReLU()
+        #self.act1 = nn.LogSoftmax(dim=2)
+        self.act = nn.SiLU()
+        self.act1=nn.RReLU()
+
 
         if bias:
             self.bias = nn.Parameter(torch.FloatTensor(out_ft))
@@ -43,7 +44,8 @@ class GCN(nn.Module):
         else:
             seq_fts2 = torch.bmm(adj, seq_fts1)
         seq_fts2 = self.batch(seq_fts2)
-        seq_fts2 = self.act2(seq_fts2)
-        #out2 = self.act1(torch.log(seq_fts2))
-        #out2 = self.act1(seq_fts2)
+        seq_fts2 = self.act1(seq_fts2)
+        #out2=self.act2(seq_fts2)
+        #seq_fts2 = self.batch(seq_fts2)
         return seq_fts2
+
