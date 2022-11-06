@@ -58,8 +58,7 @@ def train(
     path,
     exist_B,
     epochs=500,
-    num_experiments=9,
-    _overlap_threshold=-1
+    num_experiments=1,
 ):
     sigmoidlogit = nn.Sigmoid()
     for data_name, n_communities in tqdm(dataset_dict.items()):
@@ -93,15 +92,6 @@ def train(
                 loss.backward()
                 optimiser.step()
                 model.eval()
-                #logits = model(features, adj)
-                # logits = torch.exp(logits)
-                #logits = sigmoidlogit(logits)
-                #print(logits[0][0])
-                cpu_logits = logits.view(nb_nodes, hid_units).detach().cpu().numpy()
-                #preds = torch.argmax(logits[0], dim=1).detach().cpu().numpy()
-                #nmi = normalized_mutual_info_score(true_labels, preds)
-                #print('nmi:' + str(nmi))
-            # Get predictions at the end of training
             model.eval()
             logits = model(features, adj)
             logits=sigmoidlogit(logits)
@@ -122,7 +112,6 @@ def train(
             kmeans_nmi = normalized_mutual_info_score(true_labels, kmeans_preds)
             kmeans_nmi_list[i] = kmeans_nmi
             nmi_list[i] = nmi
-            #cpu_adj = adj[0].detach().cpu().numpy() # adj[0] to get rid of the batch dimension
 
             cond_list[i] = utils.conductance(adj_metric, preds)
             kmeans_cond_list[i] = utils.conductance(adj_metric, kmeans_preds)
@@ -153,7 +142,6 @@ def run_nonoverlapping():
     path=os.path.dirname(os.path.abspath(__file__))
     dataset_dict = {
         'cora':7
-
     }
 
     hid_units=16 # This is the output
@@ -166,3 +154,7 @@ def run_nonoverlapping():
 
 if __name__ == '__main__':
     run_nonoverlapping()
+
+
+
+
